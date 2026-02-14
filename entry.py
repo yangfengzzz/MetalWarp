@@ -103,11 +103,35 @@ def main():
             import metal_backend
         except ImportError:
             print("Building metal_backend extension...", file=sys.stderr)
-            build_script = os.path.join(os.path.dirname(__file__), "build.sh")
-            comp = subprocess.run(["bash", build_script], capture_output=True, text=True)
+            project_dir = os.path.dirname(os.path.abspath(__file__))
+            source_dir = os.path.join(project_dir, "metal_runtime")
+            build_dir = os.path.join(source_dir, "build")
+            os.makedirs(build_dir, exist_ok=True)
+            # Get pybind11 cmake dir for find_package
+            pybind11_dir = subprocess.run(
+                ["python3", "-m", "pybind11", "--cmakedir"],
+                capture_output=True, text=True).stdout.strip()
+            cmake_args = ["cmake", ".."]
+            if pybind11_dir:
+                cmake_args.append(f"-Dpybind11_DIR={pybind11_dir}")
+            comp = subprocess.run(cmake_args, cwd=build_dir,
+                                  capture_output=True, text=True)
             if comp.returncode != 0:
-                print(f"Build failed:\n{comp.stderr}", file=sys.stderr)
+                print(f"CMake configure failed:\n{comp.stderr}", file=sys.stderr)
                 sys.exit(1)
+            comp = subprocess.run(["cmake", "--build", "."], cwd=build_dir,
+                                  capture_output=True, text=True)
+            if comp.returncode != 0:
+                print(f"CMake build failed:\n{comp.stderr}", file=sys.stderr)
+                sys.exit(1)
+            # Symlink the built .so into the project root so import works
+            import glob as globmod
+            so_files = globmod.glob(os.path.join(build_dir, "metal_backend*.so"))
+            if so_files:
+                link_path = os.path.join(project_dir, os.path.basename(so_files[0]))
+                if os.path.exists(link_path):
+                    os.remove(link_path)
+                os.symlink(so_files[0], link_path)
             import metal_backend
 
         device = metal_backend.MetalDevice()
