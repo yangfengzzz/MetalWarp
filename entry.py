@@ -36,7 +36,7 @@ def main():
     ap = argparse.ArgumentParser(description="Python DSL Compiler (using Python ast)")
     ap.add_argument("file", nargs="?", help="Python source file to compile/run")
     ap.add_argument(
-        "--emit", choices=["ast", "c", "c-run", "metal", "run"], default="run",
+        "--emit", choices=["ast", "c", "c-run", "metal", "metal-run", "run"], default="run",
         help="Output mode (default: run)",
     )
     ap.add_argument("--demo", action="store_true", help="Run the built-in demo program")
@@ -92,6 +92,34 @@ def main():
 
     elif args.emit == "metal":
         print(MetalCodeGenerator().generate(tree), end="")
+
+    elif args.emit == "metal-run":
+        gen = MetalCodeGenerator()
+        metal_source = gen.generate(tree)
+        configs = gen.generate_config(tree)
+
+        # Auto-build the native extension if missing
+        try:
+            import metal_backend
+        except ImportError:
+            print("Building metal_backend extension...", file=sys.stderr)
+            build_script = os.path.join(os.path.dirname(__file__), "build.sh")
+            comp = subprocess.run(["bash", build_script], capture_output=True, text=True)
+            if comp.returncode != 0:
+                print(f"Build failed:\n{comp.stderr}", file=sys.stderr)
+                sys.exit(1)
+            import metal_backend
+
+        device = metal_backend.MetalDevice()
+        for cfg in configs:
+            results = device.run_kernel(
+                metal_source, cfg["kernel"], cfg["grid_size"], cfg["buffers"]
+            )
+            print(f"=== {cfg['kernel']} (grid_size={cfg['grid_size']}) ===")
+            for name, values in results.items():
+                vals = [int(v) if isinstance(v, float) and v == int(v) else v for v in values]
+                print(f"  {name}: {vals}")
+            print()
 
     elif args.emit == "run":
         try:

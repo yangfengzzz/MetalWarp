@@ -154,3 +154,82 @@ class MetalCodeGenerator(BaseCodeGenerator):
         func = self._gen_expr(node.func)
         args = ", ".join(self._gen_expr(a) for a in node.args)
         return f"{func}({args})"
+
+    # ── config generation for metal-run ──────────────────────────────────
+
+    @staticmethod
+    def _detect_write_only_buffers(node: ast.FunctionDef) -> set:
+        """Return set of buffer param names that are only written to, never read."""
+        param_names = {a.arg for a in node.args.args}
+
+        # Find params used as subscript targets (writes)
+        written = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                        if target.value.id in param_names:
+                            written.add(target.value.id)
+
+        # Find params used as subscript values on the RHS (reads)
+        read = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                # Walk only the value side for subscript reads
+                for sub in ast.walk(child.value):
+                    if isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Name):
+                        if sub.value.id in param_names:
+                            read.add(sub.value.id)
+            elif isinstance(child, ast.Compare):
+                # Also check comparisons that read from buffers
+                for sub in ast.walk(child):
+                    if isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Name):
+                        if sub.value.id in param_names:
+                            read.add(sub.value.id)
+
+        return written - read
+
+    def generate_config(self, tree: ast.Module) -> list:
+        """Generate test run configurations for each kernel in the AST."""
+        self._infer_types(tree)
+        self._refine_param_types(tree)
+
+        configs = []
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            param_names = [a.arg for a in node.args.args]
+            if "tid" not in param_names:
+                continue
+
+            classified = self._classify_params(node)
+            write_only = self._detect_write_only_buffers(node)
+
+            grid_size = 8
+            buffers = []
+            for name, kind in classified:
+                if kind == "tid":
+                    continue
+                if kind.startswith("buffer_"):
+                    metal_type = "float" if kind == "buffer_float" else "int"
+                    if name in write_only:
+                        buffers.append({"name": name, "type": metal_type, "size": grid_size})
+                    else:
+                        data = list(range(1, grid_size + 1))
+                        if metal_type == "float":
+                            data = [float(x) for x in data]
+                        buffers.append({"name": name, "type": metal_type, "data": data})
+                elif kind == "scalar_float":
+                    buffers.append({"name": name, "type": "float", "value": 2.0})
+                elif kind == "scalar_uint":
+                    buffers.append({"name": name, "type": "uint", "value": grid_size})
+                else:
+                    buffers.append({"name": name, "type": "int", "value": grid_size})
+
+            configs.append({
+                "kernel": node.name,
+                "grid_size": grid_size,
+                "buffers": buffers,
+            })
+
+        return configs
