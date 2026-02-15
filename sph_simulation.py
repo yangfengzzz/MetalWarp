@@ -3,33 +3,107 @@
 Dam-break scenario: a tall block of water on the left collapses under gravity
 and flows rightward across the [0,1]x[0,1] domain.
 
-Two GPU kernels per timestep (hash-grid accelerated, O(N*k) instead of O(N^2)):
-  1. compute_density  — poly6 kernel, iterates over 3x3 neighboring cells
-  2. update_particles — pressure (spiky) + viscosity forces, symplectic Euler
-
-SPH parameter derivation:
-  dx    = 0.01       particle spacing
-  h     = 0.025      smoothing length (2.5 * dx, ~20 neighbors in 2D)
-  rho0  = 1000       rest density
-  mass  = rho0*dx^2  = 0.1   (ensures SPH density ~ rho0 for uniform grid)
-  cs    ~ 32         speed of sound (10x max expected velocity ~3.1 m/s)
-  k     = 1000       stiffness  (~ cs^2, linear EOS)
-  mu    = 2.0        viscosity
-  dt    = 0.0001     timestep   (CFL: dt < 0.4*h/cs ~ 0.0003)
-  gw    = 40         hash grid width (ceil(1.0 / h))
+All simulation state and hash-grid buffers are allocated on GPU. Grid construction
+is done by Metal compute kernels (no Python-side build_grid).
 """
 
 from metal_kernel import metal_kernel
 import math
 import sys
+
 sys.path.insert(0, "metal_runtime/build")
-from metal_backend import MetalRenderer
+from metal_backend import MetalRenderer, MetalDevice
 
 # ── Hash grid constants ──────────────────────────────────────────────────────
 
-H = 0.025          # smoothing length = cell size
-GRID_W = 40        # ceil(1.0 / H)
-NUM_CELLS = GRID_W * GRID_W  # 1600
+H = 0.025
+GRID_W = 40
+NUM_CELLS = GRID_W * GRID_W
+
+GRID_BUILD_SOURCE = """
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void count_particles_per_cell(
+    device float* pos_x [[buffer(0)]],
+    device float* pos_y [[buffer(1)]],
+    device int* cell_count [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& num_cells [[buffer(4)]],
+    uint cid [[thread_position_in_grid]])
+{
+    if (cid >= num_cells) return;
+
+    const float h = 0.025f;
+    const int gw = 40;
+    int count = 0;
+
+    int cell_y = int(cid) / gw;
+    int cell_x = int(cid) - cell_y * gw;
+
+    for (uint i = 0; i < n; ++i) {
+        int cx = int(pos_x[i] / h);
+        int cy = int(pos_y[i] / h);
+        if (cx < 0) cx = 0;
+        if (cx > gw - 1) cx = gw - 1;
+        if (cy < 0) cy = 0;
+        if (cy > gw - 1) cy = gw - 1;
+        if (cx == cell_x && cy == cell_y) {
+            count += 1;
+        }
+    }
+
+    cell_count[cid] = count;
+}
+
+kernel void prefix_sum_cell_counts(
+    device int* cell_count [[buffer(0)]],
+    device int* cell_start [[buffer(1)]],
+    constant uint& num_cells [[buffer(2)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid != 0) return;
+    if (num_cells == 0) return;
+
+    cell_start[0] = 0;
+    for (uint c = 1; c < num_cells; ++c) {
+        cell_start[c] = cell_start[c - 1] + cell_count[c - 1];
+    }
+}
+
+kernel void scatter_particles_by_cell(
+    device float* pos_x [[buffer(0)]],
+    device float* pos_y [[buffer(1)]],
+    device int* cell_start [[buffer(2)]],
+    device int* sorted_idx [[buffer(3)]],
+    constant uint& n [[buffer(4)]],
+    constant uint& num_cells [[buffer(5)]],
+    uint cid [[thread_position_in_grid]])
+{
+    if (cid >= num_cells) return;
+
+    const float h = 0.025f;
+    const int gw = 40;
+    int write_ptr = cell_start[cid];
+
+    int cell_y = int(cid) / gw;
+    int cell_x = int(cid) - cell_y * gw;
+
+    for (uint i = 0; i < n; ++i) {
+        int cx = int(pos_x[i] / h);
+        int cy = int(pos_y[i] / h);
+        if (cx < 0) cx = 0;
+        if (cx > gw - 1) cx = gw - 1;
+        if (cy < 0) cy = 0;
+        if (cy > gw - 1) cy = gw - 1;
+        if (cx == cell_x && cy == cell_y) {
+            sorted_idx[write_ptr] = int(i);
+            write_ptr += 1;
+        }
+    }
+}
+"""
+
 
 # ── Kernel 1: compute density (hash-grid accelerated) ───────────────────────
 
@@ -78,10 +152,8 @@ def compute_density(pos_x, pos_y, density,
 
         density[tid] = rho
 
+
 # ── Kernel 2: forces + integration (hash-grid accelerated) ──────────────────
-#
-# Standard symmetric SPH momentum equation:
-#   a_i = -sum_j m_j (P_i/rho_i^2 + P_j/rho_j^2) grad_W_ij + viscosity + gravity
 
 @metal_kernel
 def update_particles(pos_x, pos_y, vel_x, vel_y, density,
@@ -154,27 +226,22 @@ def update_particles(pos_x, pos_y, vel_x, vel_y, density,
                             hr = h - r
                             dWdr = spiky_grad * hr * hr
 
-                            # Pressure acceleration (symmetric form)
                             press_acc = mass * (pi_press / rhoi2 + pj_press / rhoj2) * dWdr
                             ax += press_acc * dpx / r * (-1.0)
                             ay += press_acc * dpy / r * (-1.0)
 
-                            # Viscosity acceleration
                             lap = visc_lap * (h - r)
                             visc_coeff = mu * mass / (rhoi * rhoj) * lap
                             ax += visc_coeff * (vel_x[j] - vxi)
                             ay += visc_coeff * (vel_y[j] - vyi)
 
-        # Gravity
         ay += grav
 
-        # Symplectic Euler integration
         nvx = vxi + dt * ax
         nvy = vyi + dt * ay
         nx = xi + dt * nvx
         ny = yi + dt * nvy
 
-        # Boundary clamping [0, 1] with velocity reflection
         damping = 0.3
         if nx < 0.0:
             nx = eps
@@ -199,38 +266,8 @@ def update_particles(pos_x, pos_y, vel_x, vel_y, density,
         new_vel_y[tid] = nvy
 
 
-# ── Build hash grid (Python-side, O(N)) ─────────────────────────────────────
-
-def build_grid(pos_x, pos_y, N):
-    """Count-sort particles into grid cells.  Returns (cell_start, cell_count, sorted_idx)."""
-    cell_counts = [0] * NUM_CELLS
-    particle_cell = [0] * N
-
-    for i in range(N):
-        cx = max(0, min(GRID_W - 1, int(pos_x[i] / H)))
-        cy = max(0, min(GRID_W - 1, int(pos_y[i] / H)))
-        c = cy * GRID_W + cx
-        particle_cell[i] = c
-        cell_counts[c] += 1
-
-    # Prefix sum → cell_start
-    cell_starts = [0] * NUM_CELLS
-    for c in range(1, NUM_CELLS):
-        cell_starts[c] = cell_starts[c - 1] + cell_counts[c - 1]
-
-    # Scatter particle indices into sorted array
-    sorted_idx = [0] * N
-    offsets = cell_starts[:]
-    for i in range(N):
-        c = particle_cell[i]
-        sorted_idx[offsets[c]] = i
-        offsets[c] += 1
-
-    return cell_starts, cell_counts, sorted_idx
-
-
 # ── Initial conditions: dam-break block on the left ─────────────────────────
-# Particles fill [0.005, 0.295] x [0.005, 0.595] with spacing dx=0.01
+
 
 dx = 0.01
 cols, rows = [], []
@@ -243,83 +280,120 @@ while r < 0.60:
     rows.append(r)
     r += dx
 
-pos_x, pos_y = [], []
+init_pos_x, init_pos_y = [], []
 for ry in rows:
     for cx in cols:
-        pos_x.append(cx)
-        pos_y.append(ry)
+        init_pos_x.append(cx)
+        init_pos_y.append(ry)
 
-N = len(pos_x)
-vel_x = [0.0] * N
-vel_y = [0.0] * N
-
-# ── Print generated Metal source ────────────────────────────────────────────
+N = len(init_pos_x)
+init_vel_x = [0.0] * N
+init_vel_y = [0.0] * N
 
 print("=== Generated Metal: compute_density ===")
 print(compute_density.metal_source)
 print("=== Generated Metal: update_particles ===")
 print(update_particles.metal_source)
 
-# ── Create Metal renderer ──────────────────────────────────────────────────
+device = MetalDevice()
+renderer = MetalRenderer(device, 800, 800)
 
-renderer = MetalRenderer(800, 800)
+# ── Persistent GPU buffers (all simulation state lives on GPU) ─────────────
 
-# ── Simulation loop ─────────────────────────────────────────────────────────
+pos_x_buf = device.create_buffer_with_data("float", init_pos_x)
+pos_y_buf = device.create_buffer_with_data("float", init_pos_y)
+vel_x_buf = device.create_buffer_with_data("float", init_vel_x)
+vel_y_buf = device.create_buffer_with_data("float", init_vel_y)
+
+density_buf = device.create_buffer("float", N)
+new_pos_x_buf = device.create_buffer("float", N)
+new_pos_y_buf = device.create_buffer("float", N)
+new_vel_x_buf = device.create_buffer("float", N)
+new_vel_y_buf = device.create_buffer("float", N)
+
+cell_start_buf = device.create_buffer("int", NUM_CELLS)
+cell_count_buf = device.create_buffer("int", NUM_CELLS)
+sorted_idx_buf = device.create_buffer("int", N)
+
+n_buf = device.create_scalar_buffer("uint", N)
+num_cells_buf = device.create_scalar_buffer("uint", NUM_CELLS)
 
 num_steps = 10000
 print_every = 200
 
-print(f"\nRunning SPH dam-break: {N} particles, {num_steps} steps (hash-grid accelerated)")
-print(f"Initial center of mass: x={sum(pos_x)/N:.4f}, y={sum(pos_y)/N:.4f}\n")
+print(f"\nRunning SPH dam-break: {N} particles, {num_steps} steps (GPU hash-grid)")
+print(f"Initial center of mass: x={sum(init_pos_x)/N:.4f}, y={sum(init_pos_y)/N:.4f}\n")
 
 for step in range(num_steps):
     if not renderer.poll_events():
         print("Window closed, stopping simulation.")
         break
 
-    # Build spatial hash grid (O(N))
-    cell_starts, cell_counts, sorted_idx = build_grid(pos_x, pos_y, N)
+    # Step 0: Build spatial hash grid on GPU
+    device.run_kernel_with_buffers(
+        GRID_BUILD_SOURCE,
+        "count_particles_per_cell",
+        NUM_CELLS,
+        [pos_x_buf, pos_y_buf, cell_count_buf, n_buf, num_cells_buf],
+    )
+    device.run_kernel_with_buffers(
+        GRID_BUILD_SOURCE,
+        "prefix_sum_cell_counts",
+        1,
+        [cell_count_buf, cell_start_buf, num_cells_buf],
+    )
+    device.run_kernel_with_buffers(
+        GRID_BUILD_SOURCE,
+        "scatter_particles_by_cell",
+        NUM_CELLS,
+        [pos_x_buf, pos_y_buf, cell_start_buf, sorted_idx_buf, n_buf, num_cells_buf],
+    )
 
     # Step 1: Compute density
-    density_result = compute_density.launch(grid_size=N, buffers=[
-        {"name": "pos_x",      "type": "float", "data": pos_x},
-        {"name": "pos_y",      "type": "float", "data": pos_y},
-        {"name": "density",    "type": "float", "size": N},
-        {"name": "cell_start", "type": "int",   "data": cell_starts},
-        {"name": "cell_count", "type": "int",   "data": cell_counts},
-        {"name": "sorted_idx", "type": "int",   "data": sorted_idx},
-        {"name": "n",          "type": "uint",  "value": N},
-    ])
-    density = list(density_result["density"])
+    device.run_kernel_with_buffers(
+        compute_density.metal_source,
+        "compute_density",
+        N,
+        [pos_x_buf, pos_y_buf, density_buf, cell_start_buf, cell_count_buf, sorted_idx_buf, n_buf],
+    )
 
-    # Step 2: Compute forces and integrate
-    update_result = update_particles.launch(grid_size=N, buffers=[
-        {"name": "pos_x",      "type": "float", "data": pos_x},
-        {"name": "pos_y",      "type": "float", "data": pos_y},
-        {"name": "vel_x",      "type": "float", "data": vel_x},
-        {"name": "vel_y",      "type": "float", "data": vel_y},
-        {"name": "density",    "type": "float", "data": density},
-        {"name": "new_pos_x",  "type": "float", "size": N},
-        {"name": "new_pos_y",  "type": "float", "size": N},
-        {"name": "new_vel_x",  "type": "float", "size": N},
-        {"name": "new_vel_y",  "type": "float", "size": N},
-        {"name": "cell_start", "type": "int",   "data": cell_starts},
-        {"name": "cell_count", "type": "int",   "data": cell_counts},
-        {"name": "sorted_idx", "type": "int",   "data": sorted_idx},
-        {"name": "n",          "type": "uint",  "value": N},
-    ])
+    # Step 2: Compute forces + integrate into new buffers
+    device.run_kernel_with_buffers(
+        update_particles.metal_source,
+        "update_particles",
+        N,
+        [
+            pos_x_buf,
+            pos_y_buf,
+            vel_x_buf,
+            vel_y_buf,
+            density_buf,
+            new_pos_x_buf,
+            new_pos_y_buf,
+            new_vel_x_buf,
+            new_vel_y_buf,
+            cell_start_buf,
+            cell_count_buf,
+            sorted_idx_buf,
+            n_buf,
+        ],
+    )
 
-    # Step 3: Swap buffers
-    pos_x = list(update_result["new_pos_x"])
-    pos_y = list(update_result["new_pos_y"])
-    vel_x = list(update_result["new_vel_x"])
-    vel_y = list(update_result["new_vel_y"])
+    # Step 3: Swap state buffers (GPU handle swap, no CPU copy)
+    pos_x_buf, new_pos_x_buf = new_pos_x_buf, pos_x_buf
+    pos_y_buf, new_pos_y_buf = new_pos_y_buf, pos_y_buf
+    vel_x_buf, new_vel_x_buf = new_vel_x_buf, vel_x_buf
+    vel_y_buf, new_vel_y_buf = new_vel_y_buf, vel_y_buf
 
-    # Step 4: Render frame
-    renderer.render_frame(pos_x, pos_y, vel_x, vel_y)
+    # Step 4: Render directly from persistent GPU simulation buffers
+    renderer.render_frame_from_buffers(device, pos_x_buf, pos_y_buf, vel_x_buf, vel_y_buf)
 
-    # Step 5: Print summary
     if (step + 1) % print_every == 0:
+        pos_x = device.download_buffer(pos_x_buf)
+        pos_y = device.download_buffer(pos_y_buf)
+        vel_x = device.download_buffer(vel_x_buf)
+        vel_y = device.download_buffer(vel_y_buf)
+        density = device.download_buffer(density_buf)
         cx = sum(pos_x) / N
         cy = sum(pos_y) / N
         avg_rho = sum(density) / N
@@ -327,7 +401,8 @@ for step in range(num_steps):
         print(f"Step {step+1:5d}: center=({cx:.4f}, {cy:.4f})  "
               f"avg_density={avg_rho:.1f}  max_vel={max_v:.4f}")
 
-# ── Final ASCII visualization ─────────────────────────────────────────────
+pos_x = device.download_buffer(pos_x_buf)
+pos_y = device.download_buffer(pos_y_buf)
 
 print("\n=== ASCII visualization (domain [0,1] x [0,1]) ===")
 grid_w, grid_h = 60, 30

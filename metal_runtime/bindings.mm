@@ -49,16 +49,47 @@ static py::dict run_kernel_wrapper(MetalDevice& self,
     return out;
 }
 
+static void run_kernel_with_buffers_wrapper(MetalDevice& self,
+                                            const std::string& source,
+                                            const std::string& kernel_name,
+                                            int grid_size,
+                                            py::list buffer_ids)
+{
+    std::vector<int> ids;
+    ids.reserve(py::len(buffer_ids));
+    for (auto item : buffer_ids) {
+        ids.push_back(item.cast<int>());
+    }
+    self.run_kernel_with_buffers(source, kernel_name, grid_size, ids);
+}
+
 PYBIND11_MODULE(metal_backend, m) {
     m.doc() = "Metal GPU runtime for running .metal kernels";
     py::class_<MetalDevice>(m, "MetalDevice")
         .def(py::init<>())
         .def("run_kernel", &run_kernel_wrapper,
              py::arg("source"), py::arg("kernel_name"),
-             py::arg("grid_size"), py::arg("buffer_configs"));
+             py::arg("grid_size"), py::arg("buffer_configs"))
+        .def("create_buffer", &MetalDevice::create_buffer,
+             py::arg("type"), py::arg("size"))
+        .def("create_buffer_with_data", &MetalDevice::create_buffer_with_data,
+             py::arg("type"), py::arg("data"))
+        .def("create_scalar_buffer", &MetalDevice::create_scalar_buffer,
+             py::arg("type"), py::arg("value"))
+        .def("upload_buffer", &MetalDevice::upload_buffer,
+             py::arg("buffer_id"), py::arg("data"))
+        .def("set_scalar_buffer", &MetalDevice::set_scalar_buffer,
+             py::arg("buffer_id"), py::arg("value"))
+        .def("download_buffer", &MetalDevice::download_buffer,
+             py::arg("buffer_id"))
+        .def("run_kernel_with_buffers", &run_kernel_with_buffers_wrapper,
+             py::arg("source"), py::arg("kernel_name"),
+             py::arg("grid_size"), py::arg("buffer_ids"));
 
     py::class_<MetalRenderer>(m, "MetalRenderer")
         .def(py::init<int, int>(), py::arg("width") = 800, py::arg("height") = 800)
+        .def(py::init<MetalDevice&, int, int>(),
+             py::arg("device"), py::arg("width") = 800, py::arg("height") = 800)
         .def("render_frame", [](MetalRenderer& self,
                                 py::list px, py::list py_list,
                                 py::list vx, py::list vy) {
@@ -69,6 +100,10 @@ PYBIND11_MODULE(metal_backend, m) {
             for (auto v : vy)      vel_y.push_back(v.cast<float>());
             self.render_frame(pos_x, pos_y, vel_x, vel_y);
         })
+        .def("render_frame_from_buffers", &MetalRenderer::render_frame_from_buffers,
+             py::arg("device"),
+             py::arg("pos_x_buffer_id"), py::arg("pos_y_buffer_id"),
+             py::arg("vel_x_buffer_id"), py::arg("vel_y_buffer_id"))
         .def("poll_events", &MetalRenderer::poll_events)
         .def("is_open", &MetalRenderer::is_open);
 }
