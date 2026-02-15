@@ -2,13 +2,13 @@ import ast
 import unittest
 from pathlib import Path
 
-from mycompiler.codegen_metal import MetalCodeGenerator
+from pymetal.codegen_metal import MetalCodeGenerator
 
 
 class SphKernelContractsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.source = Path("mycompiler/sph_simulation.py").read_text()
+        cls.source = Path("pymetal/sph_simulation.py").read_text()
         cls.tree = ast.parse(cls.source)
         cls.fn_map = {
             node.name: node

@@ -3,12 +3,12 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mycompiler"
+name = "pymetal"
 version = "0.1.0"
 description = "Python DSL compiler with C and Metal backends"
 readme = "docs/README.md"
 requires-python = ">=3.10"
-authors = [{ name = "MyCompiler Contributors" }]
+authors = [{ name = "PyMetal Contributors" }]
 license = { text = "Proprietary" }
 keywords = ["compiler", "dsl", "metal", "ast", "gpu"]
 classifiers = [
@@ -24,14 +24,14 @@ dev = [
 ]
 
 [project.scripts]
-mycompiler = "mycompiler.entry:main"
+pymetal = "pymetal.entry:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mycompiler*"]
+include = ["pymetal*"]
 
 [tool.coverage.run]
 source = ["."]

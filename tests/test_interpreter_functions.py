@@ -1,6 +1,6 @@
 import unittest
 
-from mycompiler.interpreter import InterpreterError
+from pymetal.interpreter import InterpreterError
 from tests.test_support import run_program
 
 

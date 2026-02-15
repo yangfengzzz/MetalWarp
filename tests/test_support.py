@@ -2,7 +2,7 @@ import ast
 import io
 from contextlib import redirect_stdout
 
-from mycompiler.interpreter import Interpreter
+from pymetal.interpreter import Interpreter
 
 
 def run_program(source: str):

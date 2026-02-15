@@ -1,4 +1,4 @@
-"""MyCompiler package."""
+"""PyMetal package."""
 
 from .entry import main
 

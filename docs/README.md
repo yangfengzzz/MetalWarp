@@ -1,6 +1,6 @@
-# MyCompiler Documentation
+# PyMetal Documentation
 
-This folder contains architecture documentation for the `MyCompiler` project.
+This folder contains architecture documentation for the `PyMetal` project.
 
 ## Table of Contents
 
