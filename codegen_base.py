@@ -96,8 +96,10 @@ class BaseCodeGenerator:
     # ── type inference: full-tree pass ───────────────────────────────────
 
     def _infer_types(self, tree: ast.Module):
-        for node in tree.body:
-            self._infer_stmt_types(node)
+        # Iterate to propagate types (e.g. subscript writes → array param types)
+        for _ in range(3):
+            for node in tree.body:
+                self._infer_stmt_types(node)
 
     def _infer_stmt_types(self, node: ast.stmt):
         if isinstance(node, ast.Assign):
@@ -105,12 +107,36 @@ class BaseCodeGenerator:
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     self._set_var_type(target.id, typ)
+                elif isinstance(target, ast.Subscript):
+                    if isinstance(target.value, ast.Name):
+                        name = target.value.id
+                        existing = self._type_of_var(name)
+                        merged = self._merge_types(existing, typ)
+                        # Update param types directly if it's a parameter
+                        if (self._current_func and
+                                name in self.func_param_types.get(
+                                    self._current_func, {})):
+                            self.func_param_types[self._current_func][name] = merged
+                        else:
+                            self._set_var_type(name, merged)
 
         elif isinstance(node, ast.AugAssign):
             if isinstance(node.target, ast.Name):
                 existing = self._type_of_var(node.target.id)
                 rhs = self._infer_expr_type(node.value)
                 self._set_var_type(node.target.id, self._merge_types(existing, rhs))
+            elif isinstance(node.target, ast.Subscript):
+                if isinstance(node.target.value, ast.Name):
+                    name = node.target.value.id
+                    existing = self._type_of_var(name)
+                    rhs = self._infer_expr_type(node.value)
+                    merged = self._merge_types(existing, rhs)
+                    if (self._current_func and
+                            name in self.func_param_types.get(
+                                self._current_func, {})):
+                        self.func_param_types[self._current_func][name] = merged
+                    else:
+                        self._set_var_type(name, merged)
 
         elif isinstance(node, ast.FunctionDef):
             old_func = self._current_func
