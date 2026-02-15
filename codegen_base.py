@@ -141,9 +141,17 @@ class BaseCodeGenerator:
         elif isinstance(node, ast.FunctionDef):
             old_func = self._current_func
             self._current_func = node.name
-            self.func_param_types[node.name] = {
-                a.arg: self.INT for a in node.args.args
-            }
+            param_types = {}
+            for a in node.args.args:
+                typ = self.INT
+                ann = a.annotation
+                if isinstance(ann, ast.Name):
+                    if ann.id in ("float", "double"):
+                        typ = self.DOUBLE
+                    elif ann.id in ("int", "uint"):
+                        typ = self.INT
+                param_types[a.arg] = typ
+            self.func_param_types[node.name] = param_types
             self.func_local_types[node.name] = {}
             for s in node.body:
                 self._infer_stmt_types(s)

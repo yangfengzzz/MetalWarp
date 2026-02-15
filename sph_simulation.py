@@ -99,10 +99,9 @@ def scatter_particles_by_cell(pos_x, pos_y, cell_start, sorted_idx, n, num_cells
 
 @metal_kernel
 def compute_density(pos_x, pos_y, density,
-                    cell_start, cell_count, sorted_idx, n, tid):
+                    cell_start, cell_count, sorted_idx, mass: float, n, tid):
     if tid < n:
         h = 0.025
-        mass = 0.1
         gw = 40
         h2 = h * h
         h4 = h2 * h2
@@ -148,10 +147,9 @@ def compute_density(pos_x, pos_y, density,
 @metal_kernel
 def update_particles(pos_x, pos_y, vel_x, vel_y, density,
                      new_pos_x, new_pos_y, new_vel_x, new_vel_y,
-                     cell_start, cell_count, sorted_idx, n, tid):
+                     cell_start, cell_count, sorted_idx, mass: float, n, tid):
     if tid < n:
         h = 0.025
-        mass = 0.1
         rho0 = 1000.0
         k_stiff = 1000.0
         mu = 2.0
@@ -259,7 +257,9 @@ def update_particles(pos_x, pos_y, vel_x, vel_y, density,
 # ── Initial conditions: dam-break block on the left ─────────────────────────
 
 
-dx = 0.01
+dx = 0.006
+rho0 = 1000.0
+particle_mass = rho0 * dx * dx
 cols, rows = [], []
 c = dx * 0.5
 while c < 0.30:
@@ -308,6 +308,7 @@ sorted_idx_buf = device.create_buffer("int", N)
 n_buf = device.create_scalar_buffer("uint", N)
 num_cells_buf = device.create_scalar_buffer("uint", NUM_CELLS)
 num_cells_int_buf = device.create_scalar_buffer("int", NUM_CELLS)
+mass_buf = device.create_scalar_buffer("float", particle_mass)
 
 num_steps = 10000
 print_every = 200
@@ -345,7 +346,7 @@ for step in range(num_steps):
         compute_density.metal_source,
         "compute_density",
         N,
-        [pos_x_buf, pos_y_buf, density_buf, cell_start_buf, cell_count_buf, sorted_idx_buf, n_buf],
+        [pos_x_buf, pos_y_buf, density_buf, cell_start_buf, cell_count_buf, sorted_idx_buf, mass_buf, n_buf],
     )
 
     # Step 2: Compute forces + integrate into new buffers
@@ -366,6 +367,7 @@ for step in range(num_steps):
             cell_start_buf,
             cell_count_buf,
             sorted_idx_buf,
+            mass_buf,
             n_buf,
         ],
     )
