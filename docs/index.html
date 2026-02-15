@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyCompiler Docs - Architecture</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --ink: #1f2430;
+      --muted: #5d6577;
+      --card: #ffffff;
+      --line: #d7dbe3;
+      --accent: #0f766e;
+      --accent2: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 10% 0%, #e9f5f2 0, transparent 40%), var(--bg);
+      line-height: 1.5;
+    }
+    header {
+      padding: 40px 24px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(130deg, #ffffff, #f3faf8);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: .3px; }
+    p { margin: 0; color: var(--muted); }
+    nav { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    nav a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    main { padding: 24px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(22, 27, 45, .05);
+    }
+    .card h2 { margin: 0 0 10px; font-size: 20px; }
+    code { background: #eef2f8; padding: 1px 6px; border-radius: 5px; }
+    ul { margin: 8px 0 0 18px; }
+    .diagram { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+    footer { color: var(--muted); font-size: 13px; padding: 18px 24px 28px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>MyCompiler Architecture</h1>
+      <p>Python DSL front-end, AST-based multi-backend compiler, and Metal GPU runtime for simulation workloads.</p>
+      <nav>
+        <a href="./index.html">Overview</a>
+        <a href="./compiler-design.html">DSL Compiler Design</a>
+        <a href="./runtime-design.html">Runtime + SPH Flow</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="grid">
+      <section class="card">
+        <h2>Repository Structure</h2>
+        <ul>
+          <li><code>entry.py</code>: CLI entry point and backend dispatch</li>
+          <li><code>interpreter.py</code>: tree-walk execution backend</li>
+          <li><code>codegen_base.py</code>: shared type inference + AST emission logic</li>
+          <li><code>codegen_c.py</code>: C backend</li>
+          <li><code>codegen_metal.py</code>: Metal backend</li>
+          <li><code>metal_kernel.py</code>: <code>@metal_kernel</code> decorator flow</li>
+          <li><code>metal_runtime/</code>: pybind11 + Metal C++ runtime/renderer</li>
+          <li><code>sph_simulation.py</code>: GPU SPH dam-break application</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Execution Modes</h2>
+        <ul>
+          <li><code>--emit run</code>: interpreted execution</li>
+          <li><code>--emit ast</code>: AST dump</li>
+          <li><code>--emit c</code> / <code>c-run</code>: C generation / compile / execute</li>
+          <li><code>--emit metal</code> / <code>metal-run</code>: MSL generation / GPU execution</li>
+        </ul>
+      </section>
+
+      <section class="card" style="grid-column: 1 / -1;">
+        <h2>Top-Level System Diagram</h2>
+        <div class="diagram">
+          <svg viewBox="0 0 1100 340" width="100%" aria-label="System architecture diagram">
+            <defs>
+              <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <polygon points="0,0 8,4 0,8" fill="#4b5563" />
+              </marker>
+            </defs>
+
+            <rect x="20" y="35" width="185" height="70" rx="12" fill="#e8f7f4" stroke="#99d3c8"/>
+            <text x="32" y="62" font-size="15" fill="#115e59">DSL Source (.py/.dsl)</text>
+            <text x="32" y="83" font-size="12" fill="#3f495c">Python subset + kernels</text>
+
+            <rect x="245" y="35" width="185" height="70" rx="12" fill="#f0f5ff" stroke="#a7bff3"/>
+            <text x="257" y="62" font-size="15" fill="#1d4ed8">Python AST</text>
+            <text x="257" y="83" font-size="12" fill="#3f495c">ast.parse(...)</text>
+
+            <rect x="470" y="15" width="195" height="110" rx="12" fill="#ffffff" stroke="#cad1de"/>
+            <text x="482" y="40" font-size="15" fill="#111827">Compiler Frontend</text>
+            <text x="482" y="62" font-size="12" fill="#3f495c">codegen_base.py</text>
+            <text x="482" y="80" font-size="12" fill="#3f495c">- Type inference</text>
+            <text x="482" y="96" font-size="12" fill="#3f495c">- Statement/expression emit</text>
+
+            <rect x="705" y="15" width="365" height="110" rx="12" fill="#fffdf1" stroke="#eadb9a"/>
+            <text x="718" y="40" font-size="15" fill="#92400e">Backends</text>
+            <text x="718" y="62" font-size="12" fill="#3f495c">Interpreter | C | Metal</text>
+            <text x="718" y="80" font-size="12" fill="#3f495c">entry.py dispatches by --emit mode</text>
+            <text x="718" y="98" font-size="12" fill="#3f495c">codegen_c.py / codegen_metal.py</text>
+
+            <rect x="20" y="190" width="320" height="120" rx="12" fill="#f9fafb" stroke="#ced5e0"/>
+            <text x="34" y="216" font-size="15" fill="#111827">CPU Paths</text>
+            <text x="34" y="238" font-size="12" fill="#3f495c">1) interpreter.py evaluates AST directly</text>
+            <text x="34" y="255" font-size="12" fill="#3f495c">2) C backend emits program.c</text>
+            <text x="34" y="272" font-size="12" fill="#3f495c">3) c-run compiles with cc and executes</text>
+
+            <rect x="385" y="190" width="330" height="120" rx="12" fill="#eefbf7" stroke="#a5ddcb"/>
+            <text x="398" y="216" font-size="15" fill="#115e59">GPU Compile Path</text>
+            <text x="398" y="238" font-size="12" fill="#3f495c">@metal_kernel or --emit metal-run</text>
+            <text x="398" y="255" font-size="12" fill="#3f495c">MSL generated from AST</text>
+            <text x="398" y="272" font-size="12" fill="#3f495c">pybind11 extension executes kernels</text>
+
+            <rect x="760" y="190" width="310" height="120" rx="12" fill="#eff6ff" stroke="#9fc1f4"/>
+            <text x="773" y="216" font-size="15" fill="#1e3a8a">Metal Runtime</text>
+            <text x="773" y="238" font-size="12" fill="#3f495c">metal_runtime/metal_device.mm</text>
+            <text x="773" y="255" font-size="12" fill="#3f495c">MTLBuffer allocation + command dispatch</text>
+            <text x="773" y="272" font-size="12" fill="#3f495c">Renderer path for SPH visualization</text>
+
+            <line x1="205" y1="70" x2="245" y2="70" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)"/>
+            <line x1="430" y1="70" x2="470" y2="70" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)"/>
+            <line x1="665" y1="70" x2="705" y2="70" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)"/>
+
+            <line x1="880" y1="125" x2="880" y2="190" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)"/>
+            <line x1="565" y1="125" x2="550" y2="190" stroke="#4b5563" stroke-width="2" marker-end="url(#arr)"/>
+            <line x1="785" y1="125" x2="205" y2="190" stroke="#9aa3b2" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+          </svg>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="wrap">Open <code>compiler-design.html</code> for detailed DSL compiler internals and phase-by-phase diagrams.</footer>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyCompiler Docs - Runtime and SPH Flow</title>
+  <style>
+    :root {
+      --bg: #f8f5f1;
+      --ink: #1f2937;
+      --muted: #5b6474;
+      --card: #ffffff;
+      --line: #d8dee9;
+      --teal: #0f766e;
+      --blue: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 100% 0, #e8f0ff 0, transparent 35%), var(--bg);
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+    header { padding: 36px 0 16px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0 0 8px; font-size: 34px; }
+    p { margin: 0; color: var(--muted); }
+    nav { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+    nav a {
+      text-decoration: none;
+      color: #0f172a;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      margin: 16px 0;
+      box-shadow: 0 8px 24px rgba(20, 30, 55, .06);
+    }
+    h2 { margin: 0 0 10px; }
+    code { background: #edf2ff; padding: 1px 6px; border-radius: 5px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .mini { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #fafcff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Runtime and SPH Execution Design</h1>
+      <p>How generated Metal kernels are bound to buffers and executed in a GPU-resident simulation loop.</p>
+      <nav>
+        <a href="./index.html">Overview</a>
+        <a href="./compiler-design.html">DSL Compiler Design</a>
+        <a href="./runtime-design.html">Runtime + SPH Flow</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>Python ↔ Metal Runtime Architecture</h2>
+      <svg viewBox="0 0 1100 305" width="100%" aria-label="Runtime architecture">
+        <defs>
+          <marker id="arrx" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#334155"/>
+          </marker>
+        </defs>
+        <rect x="18" y="25" width="260" height="120" rx="12" fill="#eefbf7" stroke="#a7ddce"/>
+        <text x="31" y="53" font-size="14">Python Layer</text>
+        <text x="31" y="74" font-size="12" fill="#455">sph_simulation.py / metal_kernel.py</text>
+        <text x="31" y="92" font-size="12" fill="#455">- create scalar/vector buffers</text>
+        <text x="31" y="110" font-size="12" fill="#455">- dispatch kernels by source + name</text>
+
+        <rect x="320" y="25" width="300" height="120" rx="12" fill="#eff6ff" stroke="#a5c6f2"/>
+        <text x="333" y="53" font-size="14">pybind11 Bridge</text>
+        <text x="333" y="74" font-size="12" fill="#455">metal_runtime/bindings.mm</text>
+        <text x="333" y="92" font-size="12" fill="#455">- convert Python lists ↔ C++ vectors</text>
+        <text x="333" y="110" font-size="12" fill="#455">- expose MetalDevice / MetalRenderer</text>
+
+        <rect x="662" y="25" width="420" height="120" rx="12" fill="#fff7ed" stroke="#fdba74"/>
+        <text x="675" y="53" font-size="14">Metal C++ Runtime</text>
+        <text x="675" y="74" font-size="12" fill="#455">metal_device.mm / metal_renderer.mm</text>
+        <text x="675" y="92" font-size="12" fill="#455">- newLibrary(source), newComputePipelineState</text>
+        <text x="675" y="110" font-size="12" fill="#455">- setBuffer, dispatchThreads, waitUntilCompleted</text>
+
+        <rect x="18" y="180" width="510" height="100" rx="12" fill="#ffffff" stroke="#d3dae8"/>
+        <text x="31" y="208" font-size="14">GPU Resource Model</text>
+        <text x="31" y="228" font-size="12" fill="#455">Persistent buffer table: id → { MTL::Buffer*, type, count, is_scalar }</text>
+        <text x="31" y="246" font-size="12" fill="#455">APIs: create_buffer, create_buffer_with_data, create_scalar_buffer</text>
+        <text x="31" y="264" font-size="12" fill="#455">Execution: run_kernel_with_buffers(source, kernel, grid_size, buffer_ids)</text>
+
+        <rect x="560" y="180" width="522" height="100" rx="12" fill="#ffffff" stroke="#d3dae8"/>
+        <text x="573" y="208" font-size="14">Renderer Integration</text>
+        <text x="573" y="228" font-size="12" fill="#455">render_frame_from_buffers(device, pos_x_id, pos_y_id, vel_x_id, vel_y_id)</text>
+        <text x="573" y="246" font-size="12" fill="#455">No per-frame CPU repack; draw directly from existing simulation buffers</text>
+        <text x="573" y="264" font-size="12" fill="#455">Occasional download only for logs/ASCII snapshot</text>
+
+        <line x1="278" y1="85" x2="320" y2="85" stroke="#334155" stroke-width="2" marker-end="url(#arrx)"/>
+        <line x1="620" y1="85" x2="662" y2="85" stroke="#334155" stroke-width="2" marker-end="url(#arrx)"/>
+        <line x1="220" y1="145" x2="220" y2="180" stroke="#334155" stroke-width="2" marker-end="url(#arrx)"/>
+        <line x1="870" y1="145" x2="870" y2="180" stroke="#334155" stroke-width="2" marker-end="url(#arrx)"/>
+      </svg>
+    </section>
+
+    <section>
+      <h2>SPH Dam-Break Step Graph</h2>
+      <p class="muted">The loop in <code>sph_simulation.py</code> uses three grid-build kernels plus density/integration kernels every frame.</p>
+      <svg viewBox="0 0 1100 420" width="100%" aria-label="SPH step graph">
+        <defs>
+          <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#334155"/>
+          </marker>
+        </defs>
+        <rect x="40" y="25" width="1020" height="54" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+        <text x="56" y="57" font-size="13">Persistent buffers: pos/vel, density, cell_count/cell_start/sorted_idx, scalar n/num_cells/mass</text>
+
+        <rect x="40" y="105" width="210" height="72" rx="10" fill="#dcfce7" stroke="#86efac"/>
+        <text x="52" y="133" font-size="12">0a) count_particles_per_cell</text>
+        <text x="52" y="151" font-size="12" fill="#455">grid: NUM_CELLS</text>
+
+        <rect x="290" y="105" width="210" height="72" rx="10" fill="#dcfce7" stroke="#86efac"/>
+        <text x="302" y="133" font-size="12">0b) prefix_sum_cell_counts</text>
+        <text x="302" y="151" font-size="12" fill="#455">grid: 1</text>
+
+        <rect x="540" y="105" width="210" height="72" rx="10" fill="#dcfce7" stroke="#86efac"/>
+        <text x="552" y="133" font-size="12">0c) scatter_particles_by_cell</text>
+        <text x="552" y="151" font-size="12" fill="#455">grid: NUM_CELLS</text>
+
+        <rect x="790" y="105" width="270" height="72" rx="10" fill="#cffafe" stroke="#67e8f9"/>
+        <text x="802" y="133" font-size="12">1) compute_density (hash-grid neighbors)</text>
+        <text x="802" y="151" font-size="12" fill="#455">writes density buffer</text>
+
+        <rect x="40" y="230" width="450" height="82" rx="10" fill="#dbeafe" stroke="#93c5fd"/>
+        <text x="52" y="258" font-size="12">2) update_particles (pressure + viscosity + gravity + boundaries)</text>
+        <text x="52" y="276" font-size="12" fill="#455">writes new_pos/new_vel; reads density and hash-grid</text>
+
+        <rect x="530" y="230" width="240" height="82" rx="10" fill="#fef3c7" stroke="#facc15"/>
+        <text x="542" y="258" font-size="12">3) Swap buffer IDs</text>
+        <text x="542" y="276" font-size="12" fill="#455">old <-> new (no copy)</text>
+
+        <rect x="810" y="230" width="250" height="82" rx="10" fill="#ede9fe" stroke="#c4b5fd"/>
+        <text x="822" y="258" font-size="12">4) render_frame_from_buffers</text>
+        <text x="822" y="276" font-size="12" fill="#455">direct GPU draw</text>
+
+        <rect x="250" y="340" width="620" height="56" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="262" y="373" font-size="12">Every print interval: download selected buffers for telemetry (center, avg_density, max_vel)</text>
+
+        <line x1="250" y1="141" x2="290" y2="141" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="500" y1="141" x2="540" y2="141" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="750" y1="141" x2="790" y2="141" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="925" y1="177" x2="265" y2="230" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="490" y1="271" x2="530" y2="271" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="770" y1="271" x2="810" y2="271" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+        <line x1="935" y1="312" x2="870" y2="340" stroke="#334155" stroke-width="2" marker-end="url(#arr2)"/>
+      </svg>
+    </section>
+
+    <section>
+      <h2>Design Notes and Current Limitations</h2>
+      <div class="grid">
+        <div class="mini">
+          <h3>Good</h3>
+          <ul>
+            <li>GPU-resident state with buffer-handle swaps.</li>
+            <li>Grid build and SPH force kernels authored in Python DSL.</li>
+            <li>Renderer can consume simulation buffers directly.</li>
+          </ul>
+        </div>
+        <div class="mini">
+          <h3>Caveats</h3>
+          <ul>
+            <li>Hash-grid build currently uses O(num_cells * N) scans.</li>
+            <li>Prefix sum kernel is single-thread serial.</li>
+            <li>Large particle counts may need parallel scan/scatter redesign.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

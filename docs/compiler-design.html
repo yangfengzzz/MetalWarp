@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyCompiler Docs - DSL Compiler Design</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --ink: #1d2433;
+      --muted: #5a647a;
+      --card: #ffffff;
+      --line: #d8dfeb;
+      --accent: #0369a1;
+      --accent2: #7c3aed;
+      --ok: #047857;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f8fbff, #f4f7fb);
+      color: var(--ink);
+    }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+    header { padding: 34px 0 16px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0 0 8px; font-size: 34px; }
+    p { margin: 0; color: var(--muted); }
+    nav { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+    nav a {
+      text-decoration: none;
+      color: #0f172a;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 14px;
+      background: #fff;
+    }
+    main { padding: 22px 0 30px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 26px rgba(26, 39, 69, .06);
+    }
+    h2 { margin: 0 0 10px; font-size: 22px; }
+    h3 { margin: 18px 0 8px; font-size: 16px; color: #0f172a; }
+    code { background: #edf2ff; padding: 1px 6px; border-radius: 5px; }
+    .muted { color: var(--muted); }
+    .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .mini {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafcff;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Detailed DSL Compiler Design</h1>
+      <p>How AST is inferred, transformed, and emitted for C and Metal backends.</p>
+      <nav>
+        <a href="./index.html">Overview</a>
+        <a href="./compiler-design.html">DSL Compiler Design</a>
+        <a href="./runtime-design.html">Runtime + SPH Flow</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>Compiler Pipeline</h2>
+      <p class="muted">Core flow implemented in <code>entry.py</code>, <code>codegen_base.py</code>, <code>codegen_c.py</code>, and <code>codegen_metal.py</code>.</p>
+      <svg viewBox="0 0 1120 260" width="100%" aria-label="Compiler pipeline">
+        <defs>
+          <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#445"/>
+          </marker>
+        </defs>
+        <rect x="15" y="80" width="150" height="70" rx="10" fill="#e0f2fe" stroke="#93c5fd"/>
+        <text x="27" y="112" font-size="13">Source Program</text>
+        <text x="27" y="130" font-size="12" fill="#455">Python subset</text>
+
+        <rect x="205" y="80" width="140" height="70" rx="10" fill="#ede9fe" stroke="#c4b5fd"/>
+        <text x="217" y="112" font-size="13">ast.parse()</text>
+        <text x="217" y="130" font-size="12" fill="#455">Python AST</text>
+
+        <rect x="385" y="38" width="220" height="155" rx="10" fill="#fff" stroke="#d3dae8"/>
+        <text x="398" y="63" font-size="14">BaseCodeGenerator</text>
+        <text x="398" y="86" font-size="12" fill="#455">1) _infer_types (iterative)</text>
+        <text x="398" y="103" font-size="12" fill="#455">2) _refine_param_types</text>
+        <text x="398" y="120" font-size="12" fill="#455">3) _gen_stmt/_gen_expr</text>
+        <text x="398" y="137" font-size="12" fill="#455">4) backend overrides</text>
+        <text x="398" y="154" font-size="12" fill="#455">5) text emission buffer</text>
+
+        <rect x="645" y="35" width="200" height="72" rx="10" fill="#fef3c7" stroke="#facc15"/>
+        <text x="657" y="64" font-size="13">CCodeGenerator</text>
+        <text x="657" y="82" font-size="12" fill="#455">printf mapping / math.h</text>
+
+        <rect x="645" y="122" width="200" height="72" rx="10" fill="#dcfce7" stroke="#86efac"/>
+        <text x="657" y="150" font-size="13">MetalCodeGenerator</text>
+        <text x="657" y="168" font-size="12" fill="#455">kernel params + buffer slots</text>
+
+        <rect x="885" y="35" width="220" height="72" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="897" y="64" font-size="13">C Artifact</text>
+        <text x="897" y="82" font-size="12" fill="#455">program.c / c-run</text>
+
+        <rect x="885" y="122" width="220" height="72" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="897" y="150" font-size="13">Metal Artifact</text>
+        <text x="897" y="168" font-size="12" fill="#455">MSL source / metal-run</text>
+
+        <line x1="165" y1="115" x2="205" y2="115" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+        <line x1="345" y1="115" x2="385" y2="115" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+        <line x1="605" y1="82" x2="645" y2="71" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+        <line x1="605" y1="149" x2="645" y2="158" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+        <line x1="845" y1="71" x2="885" y2="71" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+        <line x1="845" y1="158" x2="885" y2="158" stroke="#445" stroke-width="2" marker-end="url(#a)"/>
+      </svg>
+    </section>
+
+    <section>
+      <h2>Type Inference Design</h2>
+      <p class="muted">A lightweight static inference pass supports code generation without full typing rules.</p>
+      <svg viewBox="0 0 1120 310" width="100%" aria-label="Type inference flowchart">
+        <defs>
+          <marker id="b" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#334155"/>
+          </marker>
+        </defs>
+
+        <rect x="35" y="25" width="220" height="55" rx="10" fill="#e0f2fe" stroke="#7dd3fc"/>
+        <text x="48" y="56" font-size="13">Initialize param/local/global maps</text>
+
+        <rect x="305" y="25" width="240" height="55" rx="10" fill="#fef9c3" stroke="#fde047"/>
+        <text x="317" y="56" font-size="13">3-pass _infer_types(tree)</text>
+
+        <rect x="595" y="25" width="220" height="55" rx="10" fill="#ede9fe" stroke="#c4b5fd"/>
+        <text x="607" y="56" font-size="13">_infer_expr_type(node)</text>
+
+        <rect x="865" y="25" width="220" height="55" rx="10" fill="#dcfce7" stroke="#86efac"/>
+        <text x="877" y="56" font-size="13">_merge_types(INT, DOUBLE)</text>
+
+        <rect x="145" y="120" width="300" height="65" rx="10" fill="#fff" stroke="#d6dbe6"/>
+        <text x="158" y="148" font-size="13">Assignment to Name: set variable type</text>
+        <text x="158" y="166" font-size="12" fill="#455">x = expr</text>
+
+        <rect x="500" y="120" width="300" height="65" rx="10" fill="#fff" stroke="#d6dbe6"/>
+        <text x="512" y="148" font-size="13">Assignment to Subscript: unify buffer type</text>
+        <text x="512" y="166" font-size="12" fill="#455">arr[i] = expr</text>
+
+        <rect x="145" y="215" width="300" height="65" rx="10" fill="#fff" stroke="#d6dbe6"/>
+        <text x="158" y="243" font-size="13">FunctionDef: seed param types</text>
+        <text x="158" y="261" font-size="12" fill="#455">defaults INT, optional annotations</text>
+
+        <rect x="500" y="215" width="300" height="65" rx="10" fill="#fff" stroke="#d6dbe6"/>
+        <text x="512" y="243" font-size="13">_refine_param_types via call sites</text>
+        <text x="512" y="261" font-size="12" fill="#455">propagate argument types to callee params</text>
+
+        <rect x="855" y="180" width="230" height="100" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+        <text x="868" y="207" font-size="13">Result consumed by backend:</text>
+        <text x="868" y="227" font-size="12" fill="#455">C: long long/double</text>
+        <text x="868" y="244" font-size="12" fill="#455">Metal: int/float + uint heuristics</text>
+        <text x="868" y="261" font-size="12" fill="#455">Buffer/scalar parameter layout</text>
+
+        <line x1="255" y1="52" x2="305" y2="52" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="545" y1="52" x2="595" y2="52" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="815" y1="52" x2="865" y2="52" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+
+        <line x1="425" y1="80" x2="285" y2="120" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="425" y1="80" x2="650" y2="120" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="285" y1="185" x2="285" y2="215" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="650" y1="185" x2="650" y2="215" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+        <line x1="800" y1="247" x2="855" y2="232" stroke="#334155" stroke-width="2" marker-end="url(#b)"/>
+      </svg>
+
+      <div class="cols">
+        <div class="mini">
+          <h3>Key Heuristics</h3>
+          <ul>
+            <li><code>Div</code> yields floating type; <code>FloorDiv</code> yields integer.</li>
+            <li>Buffer writes (<code>arr[i] = ...</code>) push inferred element type.</li>
+            <li>In Metal backend, params compared with <code>tid</code> are emitted as <code>uint</code>.</li>
+          </ul>
+        </div>
+        <div class="mini">
+          <h3>Known Constraints</h3>
+          <ul>
+            <li>Inference is intentionally shallow (not full Python semantics).</li>
+            <li>Type stability can depend on explicit numeric literals/annotations.</li>
+            <li>GPU kernels reject <code>print()</code> by design.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Metal Kernel Parameter Classification</h2>
+      <p class="muted">Implemented in <code>MetalCodeGenerator._classify_params</code>.</p>
+      <svg viewBox="0 0 1120 320" width="100%" aria-label="Parameter classification">
+        <defs>
+          <marker id="c" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0,0 8,4 0,8" fill="#334155"/>
+          </marker>
+        </defs>
+        <rect x="35" y="20" width="220" height="52" rx="8" fill="#f3f4f6" stroke="#cbd5e1"/>
+        <text x="48" y="50" font-size="13">For each function parameter</text>
+
+        <polygon points="325,20 455,20 510,70 455,120 325,120 270,70" fill="#dbeafe" stroke="#93c5fd"/>
+        <text x="320" y="73" font-size="12">name == tid ?</text>
+
+        <rect x="565" y="20" width="180" height="52" rx="8" fill="#dcfce7" stroke="#86efac"/>
+        <text x="577" y="50" font-size="13">emit thread index</text>
+
+        <polygon points="325,155 455,155 510,205 455,255 325,255 270,205" fill="#ede9fe" stroke="#c4b5fd"/>
+        <text x="315" y="208" font-size="12">used as arr[idx] ?</text>
+
+        <rect x="565" y="128" width="220" height="52" rx="8" fill="#ecfeff" stroke="#67e8f9"/>
+        <text x="577" y="159" font-size="13">buffer_float / buffer_int</text>
+
+        <polygon points="325,272 455,272 510,312 455,352 325,352 270,312" transform="translate(0,-57)" fill="#fef3c7" stroke="#facc15"/>
+        <text x="312" y="258" font-size="12">float-typed scalar ?</text>
+
+        <rect x="565" y="228" width="210" height="52" rx="8" fill="#fee2e2" stroke="#fca5a5"/>
+        <text x="577" y="260" font-size="13">scalar_float / scalar_int</text>
+
+        <rect x="825" y="128" width="250" height="152" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+        <text x="838" y="152" font-size="13">Buffer slot assignment</text>
+        <text x="838" y="173" font-size="12" fill="#455">- non-tid params consume [[buffer(i)]]</text>
+        <text x="838" y="191" font-size="12" fill="#455">- contiguous index order by signature</text>
+        <text x="838" y="209" font-size="12" fill="#455">- renderer/runtime must match order</text>
+        <text x="838" y="227" font-size="12" fill="#455">- tid maps to [[thread_position_in_grid]]</text>
+
+        <line x1="255" y1="46" x2="270" y2="70" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="510" y1="70" x2="565" y2="46" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="390" y1="120" x2="390" y2="155" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="510" y1="205" x2="565" y2="154" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="390" y1="255" x2="390" y2="272" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="510" y1="255" x2="565" y2="254" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+        <line x1="785" y1="154" x2="825" y2="154" stroke="#334155" stroke-width="2" marker-end="url(#c)"/>
+      </svg>
+    </section>
+  </main>
+</body>
+</html>
