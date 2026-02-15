@@ -1,4 +1,5 @@
 #include "metal_device.h"
+#include "metal_renderer.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -55,4 +56,19 @@ PYBIND11_MODULE(metal_backend, m) {
         .def("run_kernel", &run_kernel_wrapper,
              py::arg("source"), py::arg("kernel_name"),
              py::arg("grid_size"), py::arg("buffer_configs"));
+
+    py::class_<MetalRenderer>(m, "MetalRenderer")
+        .def(py::init<int, int>(), py::arg("width") = 800, py::arg("height") = 800)
+        .def("render_frame", [](MetalRenderer& self,
+                                py::list px, py::list py_list,
+                                py::list vx, py::list vy) {
+            std::vector<float> pos_x, pos_y, vel_x, vel_y;
+            for (auto v : px)      pos_x.push_back(v.cast<float>());
+            for (auto v : py_list) pos_y.push_back(v.cast<float>());
+            for (auto v : vx)      vel_x.push_back(v.cast<float>());
+            for (auto v : vy)      vel_y.push_back(v.cast<float>());
+            self.render_frame(pos_x, pos_y, vel_x, vel_y);
+        })
+        .def("poll_events", &MetalRenderer::poll_events)
+        .def("is_open", &MetalRenderer::is_open);
 }

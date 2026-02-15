@@ -8,6 +8,9 @@ Two GPU kernels per timestep:
 
 from metal_kernel import metal_kernel
 import math
+import sys
+sys.path.insert(0, "metal_runtime/build")
+from metal_backend import MetalRenderer
 
 # ── Kernel 1: compute density for each particle ─────────────────────────────
 
@@ -165,15 +168,24 @@ print(compute_density.metal_source)
 print("=== Generated Metal: update_particles ===")
 print(update_particles.metal_source)
 
+# ── Create Metal renderer ──────────────────────────────────────────────────
+
+renderer = MetalRenderer(800, 800)
+
 # ── Simulation loop ─────────────────────────────────────────────────────────
 
-num_steps = 200
+num_steps = 2000
 print_every = 50
 
 print(f"\nRunning SPH simulation: {N} particles, {num_steps} steps")
 print(f"Initial center of mass: x={sum(pos_x)/N:.4f}, y={sum(pos_y)/N:.4f}\n")
 
 for step in range(num_steps):
+    # Pump macOS events; break if window closed
+    if not renderer.poll_events():
+        print("Window closed, stopping simulation.")
+        break
+
     # Step 1: Compute density
     density_buffers = [
         {"name": "pos_x",   "type": "float", "data": pos_x},
@@ -204,6 +216,9 @@ for step in range(num_steps):
     pos_y = list(update_result["new_pos_y"])
     vel_x = list(update_result["new_vel_x"])
     vel_y = list(update_result["new_vel_y"])
+
+    # Step 3.5: Render frame
+    renderer.render_frame(pos_x, pos_y, vel_x, vel_y)
 
     # Step 4: Print summary
     if (step + 1) % print_every == 0:
