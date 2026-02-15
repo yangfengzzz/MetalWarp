@@ -214,7 +214,7 @@ void MetalRenderer::render_frame(const std::vector<float>& pos_x,
                                                 MTL::ResourceStorageModeShared);
 
     // Uniform: point_size
-    float pointSize = 10.0f;
+    float pointSize = 8.0f;
     MTL::Buffer* uniformBuf = device->newBuffer(&pointSize, sizeof(float),
                                                  MTL::ResourceStorageModeShared);
 
