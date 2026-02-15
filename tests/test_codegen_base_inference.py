@@ -1,7 +1,7 @@
 import ast
 import unittest
 
-from codegen_base import BaseCodeGenerator
+from mycompiler.codegen_base import BaseCodeGenerator
 
 
 class BaseInferenceTests(unittest.TestCase):

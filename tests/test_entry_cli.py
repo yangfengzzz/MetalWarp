@@ -6,7 +6,7 @@ import unittest
 class EntryCliTests(unittest.TestCase):
     def test_emit_ast_demo(self):
         proc = subprocess.run(
-            [sys.executable, "entry.py", "--emit", "ast", "--demo"],
+            [sys.executable, "-m", "mycompiler.entry", "--emit", "ast", "--demo"],
             text=True,
             capture_output=True,
             check=True,
@@ -15,7 +15,7 @@ class EntryCliTests(unittest.TestCase):
 
     def test_emit_run_demo_outputs_fibonacci_prefix(self):
         proc = subprocess.run(
-            [sys.executable, "entry.py", "--emit", "run", "--demo"],
+            [sys.executable, "-m", "mycompiler.entry", "--emit", "run", "--demo"],
             text=True,
             capture_output=True,
             check=True,

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from metal_kernel import metal_kernel, MetalKernel
+from mycompiler.metal_kernel import metal_kernel, MetalKernel
 
 
 class MetalKernelDecoratorTests(unittest.TestCase):

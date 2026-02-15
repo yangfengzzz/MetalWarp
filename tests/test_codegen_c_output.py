@@ -1,7 +1,7 @@
 import ast
 import unittest
 
-from codegen_c import CCodeGenerator
+from mycompiler.codegen_c import CCodeGenerator
 
 
 class CCodegenTests(unittest.TestCase):

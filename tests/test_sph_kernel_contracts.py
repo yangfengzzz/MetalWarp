@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-from codegen_metal import MetalCodeGenerator
+from mycompiler.codegen_metal import MetalCodeGenerator
 
 
 class SphKernelContractsTests(unittest.TestCase):

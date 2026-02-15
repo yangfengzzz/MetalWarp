@@ -1,6 +1,6 @@
 import unittest
 
-from interpreter import InterpreterError
+from mycompiler.interpreter import InterpreterError
 from tests.test_support import run_program
 
 

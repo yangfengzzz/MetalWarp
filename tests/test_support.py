@@ -2,7 +2,7 @@ import ast
 import io
 from contextlib import redirect_stdout
 
-from interpreter import Interpreter
+from mycompiler.interpreter import Interpreter
 
 
 def run_program(source: str):

@@ -1,1 +1,0 @@
-from mycompiler.main import *

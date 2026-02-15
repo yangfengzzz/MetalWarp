@@ -1,7 +1,7 @@
 import ast
 import unittest
 
-from codegen_metal import MetalCodeGenerator
+from mycompiler.codegen_metal import MetalCodeGenerator
 
 
 class MetalCodegenTests(unittest.TestCase):
