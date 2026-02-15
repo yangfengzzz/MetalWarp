@@ -20,89 +20,79 @@ H = 0.025
 GRID_W = 40
 NUM_CELLS = GRID_W * GRID_W
 
-GRID_BUILD_SOURCE = """
-#include <metal_stdlib>
-using namespace metal;
+@metal_kernel
+def count_particles_per_cell(pos_x, pos_y, cell_count, n, num_cells, tid):
+    if tid < n:
+        pos_x[tid] = pos_x[tid] * 1.0
+        pos_y[tid] = pos_y[tid] * 1.0
 
-kernel void count_particles_per_cell(
-    device float* pos_x [[buffer(0)]],
-    device float* pos_y [[buffer(1)]],
-    device int* cell_count [[buffer(2)]],
-    constant uint& n [[buffer(3)]],
-    constant uint& num_cells [[buffer(4)]],
-    uint cid [[thread_position_in_grid]])
-{
-    if (cid >= num_cells) return;
+    if tid < num_cells:
+        h = 0.025
+        gw = 40
+        count = 0
+        cid = tid
 
-    const float h = 0.025f;
-    const int gw = 40;
-    int count = 0;
+        cell_y = cid // gw
+        cell_x = cid - cell_y * gw
 
-    int cell_y = int(cid) / gw;
-    int cell_x = int(cid) - cell_y * gw;
+        for i in range(0, n):
+            px = pos_x[i] * 1.0
+            py = pos_y[i] * 1.0
+            cx = px // h
+            cy = py // h
+            if cx < 0:
+                cx = 0
+            if cx > gw - 1:
+                cx = gw - 1
+            if cy < 0:
+                cy = 0
+            if cy > gw - 1:
+                cy = gw - 1
+            if cx == cell_x and cy == cell_y:
+                count += 1
 
-    for (uint i = 0; i < n; ++i) {
-        int cx = int(pos_x[i] / h);
-        int cy = int(pos_y[i] / h);
-        if (cx < 0) cx = 0;
-        if (cx > gw - 1) cx = gw - 1;
-        if (cy < 0) cy = 0;
-        if (cy > gw - 1) cy = gw - 1;
-        if (cx == cell_x && cy == cell_y) {
-            count += 1;
-        }
-    }
+        cell_count[cid] = count
 
-    cell_count[cid] = count;
-}
 
-kernel void prefix_sum_cell_counts(
-    device int* cell_count [[buffer(0)]],
-    device int* cell_start [[buffer(1)]],
-    constant uint& num_cells [[buffer(2)]],
-    uint tid [[thread_position_in_grid]])
-{
-    if (tid != 0) return;
-    if (num_cells == 0) return;
+@metal_kernel
+def prefix_sum_cell_counts(cell_count, cell_start, num_cells, tid):
+    if tid == 0 and num_cells > 0:
+        cell_start[0] = 0
+        for c in range(1, num_cells):
+            cell_start[c] = cell_start[c - 1] + cell_count[c - 1]
 
-    cell_start[0] = 0;
-    for (uint c = 1; c < num_cells; ++c) {
-        cell_start[c] = cell_start[c - 1] + cell_count[c - 1];
-    }
-}
 
-kernel void scatter_particles_by_cell(
-    device float* pos_x [[buffer(0)]],
-    device float* pos_y [[buffer(1)]],
-    device int* cell_start [[buffer(2)]],
-    device int* sorted_idx [[buffer(3)]],
-    constant uint& n [[buffer(4)]],
-    constant uint& num_cells [[buffer(5)]],
-    uint cid [[thread_position_in_grid]])
-{
-    if (cid >= num_cells) return;
+@metal_kernel
+def scatter_particles_by_cell(pos_x, pos_y, cell_start, sorted_idx, n, num_cells, tid):
+    if tid < n:
+        pos_x[tid] = pos_x[tid] * 1.0
+        pos_y[tid] = pos_y[tid] * 1.0
 
-    const float h = 0.025f;
-    const int gw = 40;
-    int write_ptr = cell_start[cid];
+    if tid < num_cells:
+        h = 0.025
+        gw = 40
+        cid = tid
+        write_ptr = cell_start[cid]
 
-    int cell_y = int(cid) / gw;
-    int cell_x = int(cid) - cell_y * gw;
+        cell_y = cid // gw
+        cell_x = cid - cell_y * gw
 
-    for (uint i = 0; i < n; ++i) {
-        int cx = int(pos_x[i] / h);
-        int cy = int(pos_y[i] / h);
-        if (cx < 0) cx = 0;
-        if (cx > gw - 1) cx = gw - 1;
-        if (cy < 0) cy = 0;
-        if (cy > gw - 1) cy = gw - 1;
-        if (cx == cell_x && cy == cell_y) {
-            sorted_idx[write_ptr] = int(i);
-            write_ptr += 1;
-        }
-    }
-}
-"""
+        for i in range(0, n):
+            px = pos_x[i] * 1.0
+            py = pos_y[i] * 1.0
+            cx = px // h
+            cy = py // h
+            if cx < 0:
+                cx = 0
+            if cx > gw - 1:
+                cx = gw - 1
+            if cy < 0:
+                cy = 0
+            if cy > gw - 1:
+                cy = gw - 1
+            if cx == cell_x and cy == cell_y:
+                sorted_idx[write_ptr] = i
+                write_ptr += 1
 
 
 # ── Kernel 1: compute density (hash-grid accelerated) ───────────────────────
@@ -317,6 +307,7 @@ sorted_idx_buf = device.create_buffer("int", N)
 
 n_buf = device.create_scalar_buffer("uint", N)
 num_cells_buf = device.create_scalar_buffer("uint", NUM_CELLS)
+num_cells_int_buf = device.create_scalar_buffer("int", NUM_CELLS)
 
 num_steps = 10000
 print_every = 200
@@ -331,19 +322,19 @@ for step in range(num_steps):
 
     # Step 0: Build spatial hash grid on GPU
     device.run_kernel_with_buffers(
-        GRID_BUILD_SOURCE,
+        count_particles_per_cell.metal_source,
         "count_particles_per_cell",
         NUM_CELLS,
         [pos_x_buf, pos_y_buf, cell_count_buf, n_buf, num_cells_buf],
     )
     device.run_kernel_with_buffers(
-        GRID_BUILD_SOURCE,
+        prefix_sum_cell_counts.metal_source,
         "prefix_sum_cell_counts",
         1,
-        [cell_count_buf, cell_start_buf, num_cells_buf],
+        [cell_count_buf, cell_start_buf, num_cells_int_buf],
     )
     device.run_kernel_with_buffers(
-        GRID_BUILD_SOURCE,
+        scatter_particles_by_cell.metal_source,
         "scatter_particles_by_cell",
         NUM_CELLS,
         [pos_x_buf, pos_y_buf, cell_start_buf, sorted_idx_buf, n_buf, num_cells_buf],
