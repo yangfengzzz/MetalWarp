@@ -31,19 +31,29 @@ def _get_device():
 
 
 class MetalKernel:
-    def __init__(self, fn):
-        self.kernel_name = fn.__name__
+    def __init__(self, fn=None, *, metal_source=None, kernel_name=None):
+        if fn is not None:
+            self.kernel_name = fn.__name__
 
-        source = inspect.getsource(fn)
-        source = textwrap.dedent(source)
-        # Strip decorator lines
-        lines = [line for line in source.splitlines()
-                 if not line.strip().startswith("@")]
-        source = "\n".join(lines)
+            source = inspect.getsource(fn)
+            source = textwrap.dedent(source)
+            # Strip decorator lines
+            lines = [line for line in source.splitlines()
+                     if not line.strip().startswith("@")]
+            source = "\n".join(lines)
 
-        tree = ast.parse(source)
-        gen = MetalCodeGenerator()
-        self.metal_source = gen.generate(tree)
+            tree = ast.parse(source)
+            gen = MetalCodeGenerator()
+            self.metal_source = gen.generate(tree)
+        else:
+            self.metal_source = metal_source
+            self.kernel_name = kernel_name
+
+    @classmethod
+    def from_file(cls, path, kernel_name):
+        with open(path, "r") as f:
+            source = f.read()
+        return cls(metal_source=source, kernel_name=kernel_name)
 
     def launch(self, grid_size, buffers):
         device = _get_device()
