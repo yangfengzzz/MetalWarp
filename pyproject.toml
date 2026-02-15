@@ -24,25 +24,20 @@ dev = [
 ]
 
 [project.scripts]
-mycompiler = "entry:main"
+mycompiler = "mycompiler.entry:main"
 
 [tool.setuptools]
-py-modules = [
-  "codegen_base",
-  "codegen_c",
-  "codegen_metal",
-  "entry",
-  "interpreter",
-  "main",
-  "metal_kernel",
-  "sph_simulation",
-]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mycompiler*"]
 
 [tool.coverage.run]
 source = ["."]
 omit = [
   "tests/*",
-  "example_*.py",
+  "examples/*",
   "main.py",
 ]
 
