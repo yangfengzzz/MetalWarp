@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mycompiler"
+version = "0.1.0"
+description = "Python DSL compiler with C and Metal backends"
+readme = "docs/README.md"
+requires-python = ">=3.10"
+authors = [{ name = "MyCompiler Contributors" }]
+license = { text = "Proprietary" }
+keywords = ["compiler", "dsl", "metal", "ast", "gpu"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Operating System :: MacOS",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "coverage>=7.0",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+  "tests/*",
+  "example_*.py",
+  "main.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

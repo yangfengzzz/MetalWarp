@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Python caches / bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tracecov/
+.trace_summary.txt
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Native extensions / binaries
+*.so
+*.dylib
+
+# Project-specific generated artifacts
+metal_runtime/build/
+metal_backend.cpython-*-darwin.so
+
+# IDE
+.idea/
+.vscode/
